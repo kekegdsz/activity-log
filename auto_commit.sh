@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-BRANCH="main"
+BRANCH="dev"
 COMMIT_FILE=".auto_commit_log"
 MAX_LINES=1000
 
