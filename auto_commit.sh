@@ -2,11 +2,11 @@
 set -e
 
 # ==================================================
-# 配置区（按需改）
+# 配置区
 # ==================================================
-BRANCH="main"                 # GitHub 默认分支，保证贡献统计深绿
-COMMIT_FILE=".auto_commit_log"
-MAX_LINES=1000                # 防止文件无限长
+BRANCH="main"                 # GitHub 默认分支
+COMMIT_PREFIX="auto_commit"   # 文件名前缀
+LINES_PER_FILE=300            # 每个文件写多少行
 
 # ==================================================
 # 找 Git 根目录
@@ -35,41 +35,39 @@ cd "$REPO_DIR"
 echo "📦 Git root: $REPO_DIR"
 
 # ==================================================
-# 切到分支（解决 Jenkins detached HEAD）
+# 切到分支
 # ==================================================
 git fetch origin
 git checkout "$BRANCH" || git switch -c "$BRANCH" origin/"$BRANCH"
 git reset --hard origin/"$BRANCH"
 
 # ==================================================
-# 制造变更（保证 GitHub 统计贡献）
+# 新建文件
 # ==================================================
-# 使用 UTC 时间，确保 GitHub 统计正确
-NOW=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
-echo "auto commit at $NOW" >> "$COMMIT_FILE"
+NOW=$(date -u "+%Y%m%d_%H%M%S")
+FILE_NAME="${COMMIT_PREFIX}_${NOW}.txt"
 
-# 控制文件大小
-LINES=$(wc -l < "$COMMIT_FILE")
-if [ "$LINES" -gt "$MAX_LINES" ]; then
-  tail -n 200 "$COMMIT_FILE" > "$COMMIT_FILE.tmp"
-  mv "$COMMIT_FILE.tmp" "$COMMIT_FILE"
-fi
+echo "生成文件: $FILE_NAME"
+
+# 生成几百行示例内容
+for i in $(seq 1 "$LINES_PER_FILE"); do
+  echo "Line $i: auto commit at $NOW" >> "$FILE_NAME"
+done
 
 # ==================================================
-# 提交
+# 提交文件
 # ==================================================
-git add "$COMMIT_FILE"
+git add "$FILE_NAME"
 
 if git diff --cached --quiet; then
   echo "ℹ️ No changes, skip commit"
   exit 0
 fi
 
-# 设置 commit 时间为 UTC，保证 GitHub 活跃度统计
 GIT_COMMITTER_DATE="$NOW" \
 GIT_AUTHOR_DATE="$NOW" \
-git commit -m "chore: auto commit ($NOW)"
+git commit -m "chore: auto commit ($NOW) - added $FILE_NAME"
 
 git push origin "$BRANCH"
 
-echo "✅ Auto commit done"
+echo "✅ Auto commit done: $FILE_NAME"
