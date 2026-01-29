@@ -6,8 +6,9 @@ set -e
 # ==================================================
 BRANCH="main"                 # GitHub 默认分支
 COMMIT_PREFIX="auto_commit"   # 文件名前缀
-LINES_PER_FILE=300            # 每个文件写多少行
-VERSION_FILE="version.log"    # 版本记录文件
+DEFAULT_LINES=300             # 默认行数
+MIN_LINES=1                   # 最小行数
+MAX_LINES=10000               # 最大行数
 
 # ==================================================
 # 找 Git 根目录
@@ -25,22 +26,52 @@ find_git_root() {
 }
 
 # ==================================================
-# 版本号递增函数 [1,5](@ref)
+# 用户输入函数
+# ==================================================
+get_user_input() {
+    while true; do
+        read -p "请输入要生成的文件行数 (默认: $DEFAULT_LINES, 输入 'r' 表示随机): " input
+
+        # 处理空输入（使用默认值）
+        if [ -z "$input" ]; then
+            LINES_PER_FILE=$DEFAULT_LINES
+            echo "使用默认行数: $LINES_PER_FILE"
+            break
+        fi
+
+        # 处理随机选项
+        if [ "$input" = "r" ] || [ "$input" = "R" ]; then
+            # 生成 MIN_LINES 到 MAX_LINES 之间的随机数
+            LINES_PER_FILE=$(( RANDOM % (MAX_LINES - MIN_LINES + 1) + MIN_LINES ))
+            echo "生成随机行数: $LINES_PER_FILE"
+            break
+        fi
+
+        # 验证输入是否为正整数
+        if [[ "$input" =~ ^[0-9]+$ ]] && [ "$input" -ge "$MIN_LINES" ] && [ "$input" -le "$MAX_LINES" ]; then
+            LINES_PER_FILE=$input
+            echo "使用指定行数: $LINES_PER_FILE"
+            break
+        else
+            echo "错误：请输入 $MIN_LINES 到 $MAX_LINES 之间的正整数，或输入 'r' 获取随机值。"
+        fi
+    done
+}
+
+# ==================================================
+# 版本号递增函数
 # ==================================================
 increment_version() {
     local version_type="${1:-patch}"
     local current_tag="$2"
 
-    # 如果没有当前tag，从v0.0.0开始
     if [ -z "$current_tag" ]; then
         echo "v0.0.1"
         return 0
     fi
 
-    # 移除v前缀以便处理数字
     current_tag=$(echo "$current_tag" | sed 's/^v//')
 
-    # 使用awk进行版本号递增 [1](@ref)
     case "$version_type" in
         "major")
             echo "$current_tag" | awk -F. '{
@@ -67,40 +98,53 @@ increment_version() {
 }
 
 # ==================================================
-# 获取最新tag [1](@ref)
+# 获取最新tag
 # ==================================================
 get_latest_tag() {
-    # 获取所有tag并按版本号排序
     local latest_tag=$(git tag --sort=-version:refname | head -n 1)
     echo "$latest_tag"
 }
 
 # ==================================================
-# 验证仓库状态 [1](@ref)
+# 生成随机内容函数
 # ==================================================
-check_repo_status() {
-    if [ -n "$(git status --porcelain)" ]; then
-        echo "❌ 错误：仓库中有未提交的更改，请先处理"
-        exit 1
+generate_random_content() {
+    local lines=$1
+    local filename=$2
+    local version=$3
+
+    # 清空或创建文件
+    > "$filename"
+
+    # 多种随机内容模板
+    local templates=(
+        "Log entry #%LINE%: System operation completed at %TIMESTAMP%"
+        "Data point %LINE%: Generated content for version %VERSION%"
+        "Record %LINE%: Automated commit sequence %TIMESTAMP%"
+        "Line %LINE%: Random data batch processing %TIMESTAMP%"
+    )
+
+    # 生成随机内容
+    for i in $(seq 1 "$lines"); do
+        # 随机选择模板
+        template_index=$(( RANDOM % ${#templates[@]} ))
+        template="${templates[$template_index]}"
+
+        # 替换模板变量
+        line_content=$(echo "$template" | \
+            sed "s/%LINE%/$i/g" | \
+            sed "s/%TIMESTAMP%/$(date -u "+%Y-%m-%d %H:%M:%S UTC")/g" | \
+            sed "s/%VERSION%/$version/g")
+
+        echo "$line_content" >> "$filename"
+    done
+
+    # 添加随机行尾内容（增加多样性）
+    if [ $(( RANDOM % 2 )) -eq 0 ]; then
+        echo "=== End of auto-generated content ===" >> "$filename"
+    else
+        echo "--- File complete. Total lines: $lines ---" >> "$filename"
     fi
-}
-
-# ==================================================
-# 生成变更日志 [5](@ref)
-# ==================================================
-generate_changelog_entry() {
-    local version="$1"
-    local commit_msg="$2"
-    local timestamp=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
-
-    cat << EOF >> CHANGELOG.md
-
-## $version ($timestamp)
-- **自动提交**: $commit_msg
-- 生成文件: ${FILE_NAME}
-- 变更类型: ${VERSION_TYPE}
-
-EOF
 }
 
 # ==================================================
@@ -117,12 +161,13 @@ fi
 cd "$REPO_DIR"
 echo "📦 Git root: $REPO_DIR"
 
-# 检查仓库状态
-check_repo_status
+# 获取用户输入的行数
+get_user_input
 
 # ==================================================
 # 版本类型选择
 # ==================================================
+echo ""
 echo "请选择版本更新类型:"
 echo "1) patch - 修订版本 (v1.0.0 → v1.0.1)"
 echo "2) minor - 次版本 (v1.0.0 → v1.1.0)"
@@ -150,7 +195,7 @@ else
 fi
 
 # ==================================================
-# 获取当前最新tag并计算新版本 [1](@ref)
+# 获取当前最新tag并计算新版本
 # ==================================================
 LATEST_TAG=$(get_latest_tag)
 echo "🔖 当前最新tag: ${LATEST_TAG:-无}"
@@ -159,17 +204,16 @@ NEW_TAG=$(increment_version "$VERSION_TYPE" "$LATEST_TAG")
 echo "🚀 新版本号: $NEW_TAG"
 
 # ==================================================
-# 新建文件
+# 新建文件（使用随机内容生成）
 # ==================================================
 NOW=$(date -u "+%Y%m%d_%H%M%S")
-FILE_NAME="${COMMIT_PREFIX}_${NOW}.txt"
+FILE_NAME="${COMMIT_PREFIX}_${NOW}_${LINES_PER_FILE}lines.txt"
 
 echo "📄 生成文件: $FILE_NAME"
+echo "📊 文件行数: $LINES_PER_FILE"
 
-# 生成几百行示例内容
-for i in $(seq 1 "$LINES_PER_FILE"); do
-  echo "Line $i: auto commit at $NOW - Version: $NEW_TAG" >> "$FILE_NAME"
-done
+# 生成随机内容
+generate_random_content "$LINES_PER_FILE" "$FILE_NAME" "$NEW_TAG"
 
 # ==================================================
 # 提交文件
@@ -181,23 +225,24 @@ if git diff --cached --quiet; then
   exit 0
 fi
 
-COMMIT_MSG="chore: auto commit ($NOW) - added $FILE_NAME - version: $NEW_TAG"
+COMMIT_MSG="chore: auto commit ($NOW) - added $FILE_NAME ($LINES_PER_FILE lines) - version: $NEW_TAG"
 
 GIT_COMMITTER_DATE="$NOW" \
 GIT_AUTHOR_DATE="$NOW" \
 git commit -m "$COMMIT_MSG"
 
 # ==================================================
-# 创建并推送tag [1,5](@ref)
+# 创建并推送tag
 # ==================================================
 echo "🏷️ 创建tag: $NEW_TAG"
 git tag -a "$NEW_TAG" -m "Release: $NEW_TAG
 - 自动生成于: $NOW
 - 变更类型: $VERSION_TYPE
-- 包含文件: $FILE_NAME"
+- 包含文件: $FILE_NAME
+- 文件行数: $LINES_PER_FILE"
 
 # ==================================================
-# 更新变更日志 [5](@ref)
+# 更新变更日志
 # ==================================================
 if [ ! -f "CHANGELOG.md" ]; then
     echo "# 变更日志" > CHANGELOG.md
@@ -205,7 +250,15 @@ if [ ! -f "CHANGELOG.md" ]; then
     echo "> 自动生成的变更记录" >> CHANGELOG.md
 fi
 
-generate_changelog_entry "$NEW_TAG" "$COMMIT_MSG"
+{
+    echo ""
+    echo "## $NEW_TAG ($(date -u "+%Y-%m-%d %H:%M:%S UTC"))"
+    echo "- **自动提交**: $COMMIT_MSG"
+    echo "- 生成文件: ${FILE_NAME}"
+    echo "- 文件行数: ${LINES_PER_FILE}"
+    echo "- 变更类型: ${VERSION_TYPE}"
+} >> CHANGELOG.md
+
 git add CHANGELOG.md
 git commit --amend --no-edit
 
@@ -219,11 +272,13 @@ git push origin "$NEW_TAG"
 # ==================================================
 # 记录版本信息
 # ==================================================
-echo "$(date -u '+%Y-%m-%d %H:%M:%S UTC') | $NEW_TAG | $VERSION_TYPE | $FILE_NAME" >> "$VERSION_FILE"
+echo "$(date -u '+%Y-%m-%d %H:%M:%S UTC') | $NEW_TAG | $VERSION_TYPE | $FILE_NAME | $LINES_PER_FILE lines" >> "version_history.log"
 
+echo ""
 echo "✅ 自动提交完成!"
 echo "📊 详情:"
 echo "   - 文件: $FILE_NAME"
+echo "   - 行数: $LINES_PER_FILE"
 echo "   - 版本: $NEW_TAG"
 echo "   - 分支: $BRANCH"
 echo "   - 变更: $VERSION_TYPE"
