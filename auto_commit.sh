@@ -24,38 +24,23 @@ if ! git rev-parse --git-dir > /dev/null 2>&1; then
     exit 1
 fi
 
-# Jenkins特殊处理：检测detached HEAD状态[6](@ref)
-CURRENT_BRANCH=$(git branch --show-current)
-if [[ -z "$CURRENT_BRANCH" ]]; then
-    info "检测到detached HEAD状态，尝试寻找远程分支..."
-    # 获取当前检出的commit对应的远程分支
-    REMOTE_BRANCH=$(git log -n 1 --pretty=%D HEAD | grep -o 'origin/[^,]*' | head -1 | sed 's#origin/##')
-
-    if [[ -n "$REMOTE_BRANCH" ]]; then
-        info "切换到分支: $REMOTE_BRANCH"
-        git checkout -b "jenkins-$REMOTE_BRANCH" "origin/$REMOTE_BRANCH" 2>/dev/null || git checkout "$REMOTE_BRANCH"
-        CURRENT_BRANCH=$(git branch --show-current)
-    else
-        # 如果找不到远程分支，使用main或master
-        if git show-ref --verify --quiet refs/heads/main; then
-            git checkout main
-            CURRENT_BRANCH="main"
-        elif git show-ref --verify --quiet refs/heads/master; then
-            git checkout master
-            CURRENT_BRANCH="master"
-        else
-            error "无法确定分支，创建临时分支"
-            git checkout -b jenkins-temp
-            CURRENT_BRANCH="jenkins-temp"
-        fi
-    fi
+# 强制在默认分支main提交，确保贡献计入绿点
+if git show-ref --verify --quiet refs/heads/main; then
+    git checkout main
+elif git show-ref --verify --quiet refs/remotes/origin/main; then
+    git checkout -B main origin/main
+else
+    error "未找到main分支，请确认默认分支名称"
+    exit 1
 fi
 
+CURRENT_BRANCH="main"
 info "当前分支: $CURRENT_BRANCH"
 
 # 设置Git用户信息（Jenkins中必须设置）[6,8](@ref)
-git config --global user.name "Jenkins"
-git config --global user.email "jenkins@$(hostname)"
+# 使用已在GitHub验证的邮箱，确保贡献计入绿点
+git config --global user.name "kekegdsz"
+git config --global user.email "240977139@qq.com"
 
 # 生成提交信息
 COMMIT_MESSAGE="${1:-}"
@@ -146,9 +131,4 @@ if git push origin "$CURRENT_BRANCH"; then
     success "✅ Jenkins构建完成！更改已提交并推送"
 else
     error "推送失败，请检查权限和网络连接"
-    # 尝试创建PR或使用其他方式推送
-    if [[ "$CURRENT_BRANCH" == jenkins-* ]]; then
-        info "尝试推送临时分支"
-        git push -u origin "$CURRENT_BRANCH"
-    fi
 fi
