@@ -24,17 +24,20 @@ if ! git rev-parse --git-dir > /dev/null 2>&1; then
     exit 1
 fi
 
-# 强制在默认分支main提交，确保贡献计入绿点
-if git show-ref --verify --quiet refs/heads/main; then
-    git checkout main
-elif git show-ref --verify --quiet refs/remotes/origin/main; then
-    git checkout -B main origin/main
+# 使用dev分支提交，再合并到main并推送
+DEV_BRANCH="dev"
+MAIN_BRANCH="main"
+
+# 准备dev分支
+if git show-ref --verify --quiet "refs/heads/$DEV_BRANCH"; then
+    git checkout "$DEV_BRANCH"
+elif git show-ref --verify --quiet "refs/remotes/origin/$DEV_BRANCH"; then
+    git checkout -B "$DEV_BRANCH" "origin/$DEV_BRANCH"
 else
-    error "未找到main分支，请确认默认分支名称"
-    exit 1
+    git checkout -b "$DEV_BRANCH"
 fi
 
-CURRENT_BRANCH="main"
+CURRENT_BRANCH="$DEV_BRANCH"
 info "当前分支: $CURRENT_BRANCH"
 
 # 设置Git用户信息（Jenkins中必须设置）[6,8](@ref)
@@ -126,9 +129,29 @@ else
 fi
 
 # 推送到远程仓库[6](@ref)
-info "推送到远程仓库..."
-if git push origin "$CURRENT_BRANCH"; then
-    success "✅ Jenkins构建完成！更改已提交并推送"
+info "推送dev分支到远程仓库..."
+if git push origin "$DEV_BRANCH"; then
+    success "dev分支推送成功"
 else
-    error "推送失败，请检查权限和网络连接"
+    error "dev分支推送失败，请检查权限和网络连接"
+fi
+
+# 合并到main并推送
+if git show-ref --verify --quiet "refs/heads/$MAIN_BRANCH"; then
+    git checkout "$MAIN_BRANCH"
+elif git show-ref --verify --quiet "refs/remotes/origin/$MAIN_BRANCH"; then
+    git checkout -B "$MAIN_BRANCH" "origin/$MAIN_BRANCH"
+else
+    error "未找到main分支，请确认默认分支名称"
+    exit 1
+fi
+
+info "合并 $DEV_BRANCH -> $MAIN_BRANCH ..."
+git merge --no-edit "$DEV_BRANCH"
+
+info "推送main分支到远程仓库..."
+if git push origin "$MAIN_BRANCH"; then
+    success "✅ Jenkins构建完成！更改已提交并推送到main"
+else
+    error "main分支推送失败，请检查权限和网络连接"
 fi
